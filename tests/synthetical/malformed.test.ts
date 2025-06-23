@@ -53,5 +53,15 @@ describe("Malformed", () => {
             Artists: ["Artist"],
             Tail: [square`Lang`]
         });
+
+        // Isolated
+        expect($("[Artist (Circle] Title")).toEqual({
+            Title: "Title",
+            Artists: ["Artist (Circle"]
+        });
+        expect($("[Artist Circle)] Title")).toEqual({
+            Title: "Title",
+            Artists: ["Artist Circle)"]
+        });
     });
 });
