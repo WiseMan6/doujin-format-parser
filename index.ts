@@ -1,34 +1,32 @@
-/** biome-ignore-all lint/suspicious/noAssignInExpressions: <explanation> */
-
+const BRACKET_OPEN_C =  new Set([40, 91, 123]);
+const BRACKET_CLOSE_C = new Set([41, 93, 125]);
 // dprint-ignore
-const GRAMMAR = new Set([
-  40, 41,   // ()
-  91, 93,   // []
-  123, 125, // {}
+const PUNCT_C = new Set([
+  40, 41,  // ()
+  91, 93,  // []
+  123, 125 // {}
 ]);
 
 // dprint-ignore
 const Types = {
-  OPEN_BARE: 100,    // `(`
-  CLOSE_BARE: 101,   // `)`
-  OPEN_SQUARE: 110,  // `[`
-  CLOSE_SQUARE: 111, // `]`
-  OPEN_CURLY: 120,   // `{`
-  CLOSE_CURLY: 121,  // `}`
   TEXT: 0,
+  BARE_OPEN: 10,    // (
+  BARE_CLOSE: 11,   // )
+  SQUARE_OPEN: 20,  // [
+  SQUARE_CLOSE: 21, // ]
+  CURLY_OPEN: 30,   // {
+  CURLY_CLOSE: 31,  // }
 } as const;
 
 const ScopeTypes = {
-  [Types.OPEN_BARE]: "Bare",
-  [Types.CLOSE_BARE]: "Bare",
-  [Types.OPEN_SQUARE]: "Square",
-  [Types.CLOSE_SQUARE]: "Square",
-  [Types.OPEN_CURLY]: "Curly",
-  [Types.CLOSE_CURLY]: "Curly",
+  [Types.BARE_OPEN]: "Bare",
+  [Types.BARE_CLOSE]: "Bare",
+  [Types.SQUARE_OPEN]: "Square",
+  [Types.SQUARE_CLOSE]: "Square",
+  [Types.CURLY_OPEN]: "Curly",
+  [Types.CURLY_CLOSE]: "Curly",
 } as const;
 
-const DICT = ["color", "ntr"];
-const DICT_SET = new Set(DICT);
 
 type ValueOf<T> = T[keyof T];
 
@@ -57,7 +55,6 @@ interface Token {
 
 interface Node extends Token {
   readonly children?: Node[];
-  // readonly unsafe?: boolean;
 }
 
 class Tokenizer {
@@ -77,12 +74,12 @@ class Tokenizer {
       this.skipWhitespaces();
 
       switch (this.source.charCodeAt(this.position)) {
-        case 91: tokens.push(this.token(Types.OPEN_SQUARE)); break;
-        case 93: tokens.push(this.token(Types.CLOSE_SQUARE)); break;
-        case 40: tokens.push(this.token(Types.OPEN_BARE)); break;
-        case 41: tokens.push(this.token(Types.CLOSE_BARE)); break;
-        case 123: tokens.push(this.token(Types.OPEN_CURLY)); break;
-        case 125: tokens.push(this.token(Types.CLOSE_CURLY)); break;
+        case 91: tokens.push(this.token(Types.SQUARE_OPEN)); break;
+        case 93: tokens.push(this.token(Types.SQUARE_CLOSE)); break;
+        case 40: tokens.push(this.token(Types.BARE_OPEN)); break;
+        case 41: tokens.push(this.token(Types.BARE_CLOSE)); break;
+        case 123: tokens.push(this.token(Types.CURLY_OPEN)); break;
+        case 125: tokens.push(this.token(Types.CURLY_CLOSE)); break;
         default: tokens.push(this.text()); break;
       }
     }
@@ -91,13 +88,11 @@ class Tokenizer {
   }
 
   private token(type: ValueOf<typeof Types>) {
-    const start = this.position;
-    this.position++;
     return {
       type,
       span: {
-        start,
-        end: start + 1,
+        start: this.position,
+        end: ++this.position,
       },
     };
   }
@@ -107,7 +102,7 @@ class Tokenizer {
     const start = this.position;
     let pos = start;
 
-    while (pos < len && !GRAMMAR.has(this.source.charCodeAt(pos))) {
+    while (pos < len && !PUNCT_C.has(this.source.charCodeAt(pos))) {
       pos++;
     }
 
@@ -133,7 +128,7 @@ function parse(tokens: Token[], start = 0, end = tokens.length): Node[] {
   let i = start;
 
   while (i < end) {
-    const token = tokens[i]!;
+    const token = tokens[i];
     const type = token.type;
 
     if (type === Types.TEXT) {
@@ -143,60 +138,47 @@ function parse(tokens: Token[], start = 0, end = tokens.length): Node[] {
     }
 
     // Even number for open, for close odd
-    if (type >= Types.OPEN_BARE && type % 2 === 0) {
-      const odd = type + 1;
-
+    if (type % 2 === 0) {
       let depth = 1;
       let j = i + 1;
 
-      // Fast-forward to matching closing bracket
       while (j < end && depth > 0) {
         const typeJ = tokens[j].type;
         if (typeJ === type) depth++;
-        if (typeJ === odd) depth--;
+        if (typeJ === type + 1) depth--;
         j++;
       }
 
       if (depth === 0) {
         nodes.push({
           type: token.type,
-          children: parse(tokens, i + 1, j - 1),
           span: {
             start: token.span.start,
             end: tokens[j - 1].span.end,
           },
+          children: parse(tokens, i + 1, j - 1),
         });
         i = j;
-      } else {
-        // nodes.push({
-        //   type: token.type,
-        //   span: token.span,
-        //   unsafe: true,
-        // });
-        i++;
+        continue;
       }
-    } else {
-      // nodes.push({
-      //   type: token.type,
-      //   span: token.span,
-      //   unsafe: true,
-      // });
-      i++;
     }
+
+    i++;
   }
 
   return nodes;
 }
 
-function transform(source: string, start: number, end: number): string[] {
+export function splitAt(source: string, start: number, end: number): string[] {
   const names: string[] = [];
 
   for (let i = start; i < end; i++) {
     const char = source.charCodeAt(i);
 
-    // Ampersand (`&`)
-    if (char === 38) {
-      // Look around to handle names like `J&K`.
+    // & =38
+    // × =215
+    if (char === 38 || char === 215) {
+      // Look around to handle names such as `J&K`.
       const left = source.charCodeAt(i - 1);
       const right = source.charCodeAt(i + 1);
       if (left === 32 || right === 32) {
@@ -204,13 +186,12 @@ function transform(source: string, start: number, end: number): string[] {
           const name = source.substring(start, i).trim();
           if (name) names.push(name);
         }
-
         start = i + 1;
       }
       continue;
     }
 
-    // Comma (`,`)
+    // , =44
     if (char === 44) {
       if (i - start) {
         const name = source.substring(start, i).trim();
@@ -218,71 +199,63 @@ function transform(source: string, start: number, end: number): string[] {
           names.push(name);
         }
       }
-
       start = i + 1;
     }
   }
 
-  const finalName = source.substring(start, end).trim();
-  if (finalName) {
-    names.push(finalName);
+  const name = source.substring(start, end).trim();
+  if (name) {
+    names.push(name);
   }
 
   return names;
 }
 
-// Quite heavy on perfomance
-function isWhitelisted(span: Span, source: string): boolean {
-  const content = source.substring(span.start + 1, span.end - 1).toLowerCase();
-  return DICT_SET.has(content) || DICT.some(word => content.includes(word));
-}
+function parseTitle(source: string, nodes: Node[], offset: number): [number, string] {
+  const start = offset;
 
-function parseTitle(nodes: Node[], source: string, end: number): [number, Span] {
-  const start = end;
-
-  if (nodes.length - end > 1) {
-    for (let j = end + 1; j < nodes.length; j++) {
+  if (nodes.length - start > 1) {
+    for (let j = offset + 1; j < nodes.length; j++) {
       const node = nodes[j];
       const type = node.type;
 
-      if (type > Types.CLOSE_BARE) break;
-      if (type === Types.TEXT) {
-        // EXPERIMENTAl:
-        // - Fixes `Title (Series) =Group=` (61)
-        // - Fixes `Title (Series) - Copy` (126)
-        //
-        // Titles like `-Title -Anthology-` shouldn't be affected.
-        if ([61, 126].includes(source.charCodeAt(node.span.start))) break;
+      // I think that accepting technical scopes as part of a title is in bad taste,
+      // but it fixes a rare issue where a specific typo just breaks everything.
+      //
+      // `(Head  [C (A)] T` is less common than `[C (A)  T` and `... T [Tail `, but worse.
+      //       ^                                       ^                    ^
+      //
+      // if (type > Types.BARE_CLOSE) break;
 
-        end = j;
+      if (type === Types.TEXT) {
+        // Fixes:
+        // - `Title (Series) =Group=` (61)
+        // - `Title (Series) - Copy`  (45)
+        if ([61, 45].includes(source.charCodeAt(node.span.start))) break;
+
+        offset = j;
       }
     }
 
-    if (
-      nodes[end + 1]?.type === Types.OPEN_BARE &&
-      source.charCodeAt(nodes[end + 1].span.start - 1) !== 32
-    ) {
-      end++;
-    }
-
-    if (
-      nodes[end + 1]?.type === Types.OPEN_BARE &&
-      isWhitelisted(nodes[end + 1].span, source)
-    ) {
-      end++;
-    }
+    // Capture sticky scope as well
+    offset += Number(
+      nodes[offset + 1]?.type === Types.BARE_OPEN &&
+        source.charCodeAt(nodes[offset + 1].span.start - 1) !== 32,
+    );
   }
 
   return [
-    end,
-    {
-      start: nodes[start].span.start,
-      end: nodes[end].span.end + Number(
-        // Make it more obvious that the title is malformed, e.g.:
-        // `Title Series)` is better than just `Title Series`.
-        [41, 93, 125].includes(source.charCodeAt(nodes[end].span.end)),
+    offset,
+    source.substring(
+      nodes[start].span.start - Number(
+        // `C (A) T` => `[C (A) T` (less diligent)
+        BRACKET_OPEN_C.has(source.charCodeAt(nodes[start].span.start - 1)),
       ),
-    },
+      nodes[offset].span.end + Number(
+        // `Title Series` => `Title Series)`
+        BRACKET_CLOSE_C.has(source.charCodeAt(nodes[offset].span.end)),
+      ),
+    ).trimEnd(),
   ];
 }
 
@@ -296,8 +269,8 @@ function pushTail(metadata: Metadata, source: string, node: Node): void {
   });
 }
 
-export function parseFilename(filename: string): Metadata {
-  const source = filename.trim();
+export function parseFilename(src: string): Metadata {
+  const source = src.trim();
   const metadata: Metadata = {
     Title: source,
   };
@@ -318,106 +291,95 @@ export function parseFilename(filename: string): Metadata {
     switch (node.type) {
       case Types.TEXT: {
         if (titleParsed) {
-          // [English] =WE ARE PROBABLY HERE= [DL]
+          // [ENG] =WE ARE PROBABLY HERE= [DL]
+          //       ^                    ^
+          // TODO: Handle unorthodox tags?
           continue;
         }
 
-        const [pos, span] = parseTitle(nodes, source, index);
-        metadata.Title = source.substring(span.start, span.end).trimEnd();
+        const [end, title] = parseTitle(source, nodes, index);
+        metadata.Title = title;
+        index = end;
 
-        index = pos;
         titleParsed = true;
         break;
       }
 
-      case Types.OPEN_BARE: {
+      case Types.BARE_OPEN: {
         if (index === offset) {
           offset++;
 
-          // Pick nearest in case they are chained for some reasons
-          if (Types.OPEN_BARE === nodes[index + 1]?.type) {
+          if (Types.BARE_OPEN === nodes[index + 1]?.type) {
             continue;
           }
 
-          if (Types.OPEN_SQUARE === nodes[index + 1]?.type) {
+          if (Types.SQUARE_OPEN === nodes[index + 1]?.type) {
             const start = node.span.start + 1;
             const end = node.span.end - 1;
 
-            metadata.Head = transform(source, start, end);
+            metadata.Head = splitAt(source, start, end);
             continue;
           }
         }
 
-        if (!titleParsed && nodes[index + 1]?.type === Types.TEXT) {
-          const [pos, span] = parseTitle(nodes, source, index);
-          metadata.Title = source.substring(span.start, span.end).trimEnd();
+        if (!titleParsed && Types.TEXT === nodes[index + 1]?.type) {
+          const [end, title] = parseTitle(source, nodes, index);
+          metadata.Title = title;
+          index = end;
 
-          index = pos;
           titleParsed = true;
           continue;
         }
 
         if (titleParsed) {
-          pushTail(/* MUT */ metadata, source, node);
+          pushTail(metadata, source, node);
         }
         break;
       }
 
-      case Types.OPEN_SQUARE: {
+      case Types.SQUARE_OPEN: {
         if (index === offset) {
-          // [AI Decensored][... (Yapo)] ...
-          if (Types.OPEN_SQUARE === nodes[index + 1]?.type) {
-            offset++;
-            continue;
-          }
-
           const children = node?.children;
           const len = children?.length;
 
-          if (!len) continue;
+          if (!len) {
+            offset++;
+            continue;
+          }
 
           const firstChild = children[0];
           if (len > 1 && firstChild.type === Types.TEXT) {
             const lastChild = children[len - 1];
 
-            if (lastChild.type === Types.OPEN_BARE) {
-              const lastCircle = children[len - 2];
-
-              // Handle artist names like `Artist(ic)`
-              // if (source.charCodeAt(lastChild.span.start - 1) !== 32) {
-              //   const artists = transform(source, firstChild.span.start, lastCircle.span.end);
-              //   artists[artists.length - 1] += source.substring(
-              //     lastChild.span.start,
-              //     lastChild.span.end
-              //   );
-              //   metadata.Artists = artists;
-              //   continue;
-              // }
-
-              // `bar` in `foo (optional) (bar)`
-              metadata.Artists = transform(source, lastChild.span.start + 1, lastChild.span.end - 1);
-              // `foo (optional)` sequence in `foo (optional) (bar)`
-              metadata.Circles = transform(source, firstChild.span.start, lastCircle.span.end);
-            } else {
-              metadata.Artists = transform(source, node.span.start + 1, node.span.end - 1);
+            if (lastChild.type === Types.BARE_OPEN) {
+              metadata.Circles = splitAt(source, firstChild.span.start, children[len - 2].span.end);
+              metadata.Artists = splitAt(source, lastChild.span.start + 1, lastChild.span.end - 1);
+              continue;
             }
-          } else {
-            metadata.Artists = transform(source, node.span.start + 1, node.span.end - 1);
           }
 
+          // [AI Decensored] [... (...)?] ...
+          // ^             ^
+          if (Types.SQUARE_OPEN === nodes[index + 1]?.type) {
+            offset++;
+            continue;
+          }
+
+          metadata.Artists = splitAt(source, node.span.start + 1, node.span.end - 1);
           continue;
         }
 
         if (titleParsed) {
-          pushTail(/* MUT */ metadata, source, node);
+          pushTail(metadata, source, node);
         }
         break;
       }
 
-      case Types.OPEN_CURLY: {
+      case Types.CURLY_OPEN: {
         if (titleParsed) {
-          pushTail(/* MUT */ metadata, source, node);
+          pushTail(metadata, source, node);
         }
+        offset++;
         break;
       }
 

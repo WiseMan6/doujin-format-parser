@@ -1,6 +1,10 @@
 {
+  "name": "doujin-format-parser",
+  "version": "1.0.0",
   "dependencies": {},
   "devDependencies": {
     "@types/bun": "^1.2.16"
-  }
+  },
+  "type": "module",
+  "main": "index.ts"
 }

@@ -1,4 +1,4 @@
-import { type ScopeType } from "../index";
+import type { ScopeType } from "../../index";
 
 export function bare(value: TemplateStringsArray) {
     return { type: "Bare" as ScopeType, value: value[0] }
