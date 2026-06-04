@@ -1,7 +1,7 @@
-const BRACKET_OPEN_C =  new Set([40, 91, 123]);
+const BRACKET_OPEN_C  = new Set([40, 91, 123]);
 const BRACKET_CLOSE_C = new Set([41, 93, 125]);
 // dprint-ignore
-const PUNCT_C = new Set([
+const DELIM_C = new Set([
   40, 41,  // ()
   91, 93,  // []
   123, 125 // {}
@@ -57,70 +57,46 @@ interface Node extends Token {
   readonly children?: Node[];
 }
 
-class Tokenizer {
-  private readonly source: string;
-  private position = 0;
+function tokenize(source: string): Token[] {
+  const tokens: Token[] = [];
+  let i = 0;
 
-  constructor(source: string) {
-    this.source = source;
-  }
+  const len = source.length;
 
-  // dprint-ignore
-  tokenize(): Token[] {
-    const tokens: Token[] = [];
+  while (i < len) {
+    const char = source.charCodeAt(i);
+    const start = i;
+    i++;
 
-    const len = this.source.length;
-    while (this.position < len) {
-      this.skipWhitespaces();
+    if (char === 32) {
+      continue;
+    }
 
-      switch (this.source.charCodeAt(this.position)) {
-        case 91: tokens.push(this.token(Types.SQUARE_OPEN)); break;
-        case 93: tokens.push(this.token(Types.SQUARE_CLOSE)); break;
-        case 40: tokens.push(this.token(Types.BARE_OPEN)); break;
-        case 41: tokens.push(this.token(Types.BARE_CLOSE)); break;
-        case 123: tokens.push(this.token(Types.CURLY_OPEN)); break;
-        case 125: tokens.push(this.token(Types.CURLY_CLOSE)); break;
-        default: tokens.push(this.text()); break;
+    switch (char) {
+      case 91: tokens.push({ type: Types.SQUARE_OPEN, span: { start, end: i } }); break;
+      case 93: tokens.push({ type: Types.SQUARE_CLOSE, span: { start, end: i } }); break;
+      case 40: tokens.push({ type: Types.BARE_OPEN, span: { start, end: i } }); break;
+      case 41: tokens.push({ type: Types.BARE_CLOSE, span: { start, end: i } }); break;
+      case 123: tokens.push({ type: Types.CURLY_OPEN, span: { start, end: i } }); break;
+      case 125: tokens.push({ type: Types.CURLY_CLOSE, span: { start, end: i } }); break;
+      default: {
+        while (i < len && !DELIM_C.has(source.charCodeAt(i))) {
+          i++;
+        }
+
+        tokens.push({
+          type: Types.TEXT,
+          span: {
+            start,
+            end: i,
+          },
+        });
+        break;
       }
     }
-
-    return tokens;
   }
 
-  private token(type: ValueOf<typeof Types>) {
-    return {
-      type,
-      span: {
-        start: this.position,
-        end: ++this.position,
-      },
-    };
-  }
-
-  private text(): Token {
-    const len = this.source.length;
-    const start = this.position;
-    let pos = start;
-
-    while (pos < len && !PUNCT_C.has(this.source.charCodeAt(pos))) {
-      pos++;
-    }
-
-    this.position = pos;
-
-    return { type: 0, span: { start, end: pos } };
-  }
-
-  private skipWhitespaces(): void {
-    const len = this.source.length;
-    let pos = this.position;
-
-    while (pos < len && this.source.charCodeAt(pos) === 32) {
-      pos++;
-    }
-
-    this.position = pos;
-  }
+  return tokens;
 }
 
 function parse(tokens: Token[], start = 0, end = tokens.length): Node[] {
@@ -275,7 +251,7 @@ export function parseFilename(src: string): Metadata {
     Title: source,
   };
 
-  const tokens = new Tokenizer(source).tokenize();
+  const tokens = tokenize(source);
   if (tokens.length === 1) {
     return metadata;
   }
